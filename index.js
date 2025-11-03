@@ -24,7 +24,7 @@ app.use(authRoutes)
 
 // Configure multer for file uploads
 const upload = multer({
-  dest: 'uploads/',
+  dest: '/tmp/public/files/images',
   fileFilter: (req, file, cb) => {
     if (file.mimetype === 'text/csv' || file.originalname.endsWith('.csv')) {
       cb(null, true);
