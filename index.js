@@ -513,7 +513,7 @@ app.use((error, req, res, next) => {
 });
 
 // Create uploads directory if it doesn't exist
-const uploadsDir = path.join(__dirname, 'uploads');
+const uploadsDir = '/tmp/public/files/images'
 if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir);
 }
