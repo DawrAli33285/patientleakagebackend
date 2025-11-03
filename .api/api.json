@@ -1,0 +1,11 @@
+{
+  "version": "1.0",
+  "apis": [
+    {
+      "identifier": "placer-analytics",
+      "source": "@placer-analytics/v1.2.1#gbb7q1y3mfb2xvcc",
+      "integrity": "sha512-06JwnjSxyeEUZfx+K9C3AGWgzXpoe2yBxvXiIgFH5OUjIachRkfiRkLKrpcPnzMIbSlx9VzTr9ZRTQgcp0HC0Q==",
+      "installerVersion": "6.1.3"
+    }
+  ]
+}
