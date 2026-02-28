@@ -12,10 +12,14 @@
   "description": "",
   "dependencies": {
     "@api/placer-analytics": "file:.api/apis/placer-analytics",
+    "@aws-sdk/client-athena": "^3.999.0",
     "axios": "^1.13.1",
     "cors": "^2.8.5",
     "csv-parser": "^3.2.0",
+    "dotenv": "^17.3.1",
     "express": "^5.1.0",
+    "json2csv": "^6.0.0-alpha.2",
+    "jsonwebtoken": "^9.0.3",
     "mongoose": "^8.19.2",
     "multer": "^2.0.2",
     "nodemon": "^3.1.10"
