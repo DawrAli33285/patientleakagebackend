@@ -19,8 +19,11 @@ const DATABASE = "sagemaker_sample_db";
 const OUTPUT_BUCKET = "s3://support-data-eu-north-1-886281029470/athena-results/";
 
 async function geocodeAddress(addressObj) {
-  const fullAddress = `${addressObj.street}, ${addressObj.city}, ${addressObj.state}`;
-  const encoded = encodeURIComponent(fullAddress);
+  // Remove suite/unit numbers as they confuse geocoders
+  const cleanStreet = addressObj.street
+    .replace(/\s*(ste|suite|unit|apt|#|floor|fl)\s*[\w-]*/gi, '')
+    .trim();
+  const fullAddress = `${cleanStreet}, ${addressObj.city}, ${addressObj.state}`;  const encoded = encodeURIComponent(fullAddress);
   const url = `https://nominatim.openstreetmap.org/search?q=${encoded}&format=json&limit=1`;
 
   return new Promise((resolve, reject) => {
@@ -106,6 +109,7 @@ export async function getFootData(req, res) {
     }
 
     const primaryAddr = addresses[0];
+    console.log('🔍 Full addresses array received:', JSON.stringify(addresses, null, 2));
     console.log(`🔍 Geocoding primary: ${primaryAddr.street}, ${primaryAddr.city}, ${primaryAddr.state}`);
     const primaryGeo = await geocodeAddress(primaryAddr);
     await new Promise(r => setTimeout(r, 1100));
@@ -121,18 +125,25 @@ export async function getFootData(req, res) {
     };
 
     const SECONDARY_LOCATIONS = [];
-    for (const addr of addresses.slice(1)) {
-      console.log(`🔍 Geocoding: ${addr.street}, ${addr.city}, ${addr.state}`);
-      const geo = await geocodeAddress(addr);
+    const secondaryAddrs = addresses.slice(1);
+    
+    for (let i = 0; i < secondaryAddrs.length; i++) {
+      const addr = secondaryAddrs[i];
+      try {
+        console.log(`🔍 Geocoding (${i + 1}/${secondaryAddrs.length}): ${addr.street}, ${addr.city}, ${addr.state}`);
+        const geo = await geocodeAddress(addr);
+        console.log(`✅ ${addr.name} → lat=${geo.lat}, lon=${geo.lon}`);
+        SECONDARY_LOCATIONS.push({
+          name: addr.name,
+          address: `${addr.street}, ${addr.city}, ${addr.state}`,
+          lat: geo.lat,
+          lon: geo.lon,
+          radius: 0.5,
+        });
+      } catch (err) {
+        console.warn(`⚠️ Skipping ${addr.name}: ${err.message}`);
+      }
       await new Promise(r => setTimeout(r, 1100));
-      console.log(`✅ Secondary geocoded: ${addr.name} → lat=${geo.lat}, lon=${geo.lon}`);
-      SECONDARY_LOCATIONS.push({
-        name: addr.name,
-        address: `${addr.street}, ${addr.city}, ${addr.state}`,
-        lat: geo.lat,
-        lon: geo.lon,
-        radius: 0.5,
-      });
     }
 
     console.log(`\n=== Finding MAIDs near primary: ${PRIMARY_LOCATION.name} ===`);
@@ -190,6 +201,9 @@ export async function getFootData(req, res) {
         address: secondary.address,
         matched_maid_count: matchedMAIDs.length,
         matched_maids: matchedMAIDs,
+        overlap_percentage: primaryMAIDs.length > 0 
+          ? ((matchedMAIDs.length / primaryMAIDs.length) * 100).toFixed(1)
+          : 0
       });
     }
 
