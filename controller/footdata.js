@@ -19,7 +19,7 @@ const DATABASE = "sagemaker_sample_db";
 const OUTPUT_BUCKET = "s3://support-data-eu-north-1-886281029470/athena-results/";
 
 async function geocodeAddress(addressObj) {
-  // Remove suite/unit numbers as they confuse geocoders
+  
   const cleanStreet = addressObj.street
     .replace(/\s*(ste|suite|unit|apt|#|floor|fl)\s*[\w-]*/gi, '')
     .trim();
@@ -102,128 +102,152 @@ async function runAthenaQuery(sql) {
 
 export async function getFootData(req, res) {
   try {
-    const { addresses, startDate, endDate } = req.body;
+    const { pairs, addresses, startDate, endDate } = req.body;
 
-    if (!addresses || addresses.length < 2) {
+   
+    let primaryMap = new Map();
+
+    if (pairs && pairs.length) {
+    
+      for (const pair of pairs) {
+        const key = `${pair.primary.street}|${pair.primary.city}|${pair.primary.state}`;
+        if (!primaryMap.has(key)) {
+          primaryMap.set(key, { primaryAddr: pair.primary, competitors: [] });
+        }
+        primaryMap.get(key).competitors.push(pair.competitor);
+      }
+    } else if (addresses && addresses.length >= 2) {
+     
+      const key = `${addresses[0].street}|${addresses[0].city}|${addresses[0].state}`;
+      primaryMap.set(key, { primaryAddr: addresses[0], competitors: addresses.slice(1) });
+    } else {
       return res.status(400).json({ error: "Need at least a primary and one secondary address" });
     }
 
-    const primaryAddr = addresses[0];
-    console.log('🔍 Full addresses array received:', JSON.stringify(addresses, null, 2));
-    console.log(`🔍 Geocoding primary: ${primaryAddr.street}, ${primaryAddr.city}, ${primaryAddr.state}`);
-    const primaryGeo = await geocodeAddress(primaryAddr);
-    await new Promise(r => setTimeout(r, 1100));
-    console.log(`✅ Primary geocoded: lat=${primaryGeo.lat}, lon=${primaryGeo.lon}`);
-    console.log(`📦 Full request body:`, JSON.stringify(req.body, null, 2));
+    const allResults = [];
 
-    const PRIMARY_LOCATION = {
-      name: primaryAddr.name,
-      address: `${primaryAddr.street}, ${primaryAddr.city}, ${primaryAddr.state}`,
-      lat: primaryGeo.lat,
-      lon: primaryGeo.lon,
-      radius: 0.5,
-    };
+    for (const [, { primaryAddr, competitors }] of primaryMap) {
+      console.log(`\n=== Processing primary: ${primaryAddr.name} ===`);
 
-    const SECONDARY_LOCATIONS = [];
-    const secondaryAddrs = addresses.slice(1);
-    
-    for (let i = 0; i < secondaryAddrs.length; i++) {
-      const addr = secondaryAddrs[i];
+      let primaryGeo;
       try {
-        console.log(`🔍 Geocoding (${i + 1}/${secondaryAddrs.length}): ${addr.street}, ${addr.city}, ${addr.state}`);
-        const geo = await geocodeAddress(addr);
-        console.log(`✅ ${addr.name} → lat=${geo.lat}, lon=${geo.lon}`);
-        SECONDARY_LOCATIONS.push({
-          name: addr.name,
-          address: `${addr.street}, ${addr.city}, ${addr.state}`,
-          lat: geo.lat,
-          lon: geo.lon,
-          radius: 0.5,
-        });
+        console.log(`🔍 Geocoding primary: ${primaryAddr.street}, ${primaryAddr.city}, ${primaryAddr.state}`);
+        primaryGeo = await geocodeAddress(primaryAddr);
+        console.log(`✅ Primary geocoded: lat=${primaryGeo.lat}, lon=${primaryGeo.lon}`);
       } catch (err) {
-        console.warn(`⚠️ Skipping ${addr.name}: ${err.message}`);
+        console.warn(`⚠️ Skipping primary ${primaryAddr.name}: ${err.message}`);
+        continue;
       }
       await new Promise(r => setTimeout(r, 1100));
-    }
 
-    console.log(`\n=== Finding MAIDs near primary: ${PRIMARY_LOCATION.name} ===`);
-    const pbb = boundingBox(PRIMARY_LOCATION);
+      const PRIMARY_LOCATION = {
+        name: primaryAddr.name,
+        address: `${primaryAddr.street}, ${primaryAddr.city}, ${primaryAddr.state}`,
+        lat: primaryGeo.lat,
+        lon: primaryGeo.lon,
+        radius: 0.5,
+      };
 
-    const primaryRows = await runAthenaQuery(`
-      SELECT DISTINCT device_id
-      FROM sagemaker_sample_db.incoming
-      WHERE latitude IS NOT NULL
-        AND longitude IS NOT NULL
-        AND CAST(latitude AS DOUBLE) BETWEEN ${pbb.minLat} AND ${pbb.maxLat}
-        AND CAST(longitude AS DOUBLE) BETWEEN ${pbb.minLon} AND ${pbb.maxLon}
-        AND CAST(timestamp AS DATE) >= DATE '${startDate}'
-        AND CAST(timestamp AS DATE) <= DATE '${endDate}'
-    `);
-
-    const primaryMAIDs = primaryRows.map(r => r.device_id);
-    console.log(`  Unique MAIDs at primary: ${primaryMAIDs.length}`);
-    console.log(`  Bounding box used: ${JSON.stringify(pbb)}`);
-    if (!primaryMAIDs.length) {
-      return res.status(200).json({
-        success: true,
-        data: {
-          primary_location: PRIMARY_LOCATION.name,
-          primary_visitor_count: 0,
-          secondary_matches: []
+      const SECONDARY_LOCATIONS = [];
+      for (let i = 0; i < competitors.length; i++) {
+        const addr = competitors[i];
+        try {
+          console.log(`🔍 Geocoding (${i + 1}/${competitors.length}): ${addr.street}, ${addr.city}, ${addr.state}`);
+          const geo = await geocodeAddress(addr);
+          console.log(`✅ ${addr.name} → lat=${geo.lat}, lon=${geo.lon}`);
+          SECONDARY_LOCATIONS.push({
+            name: addr.name,
+            address: `${addr.street}, ${addr.city}, ${addr.state}`,
+            lat: geo.lat,
+            lon: geo.lon,
+            radius: 0.5,
+          });
+        } catch (err) {
+          console.warn(`⚠️ Skipping ${addr.name}: ${err.message}`);
         }
-      });
-    }
+        await new Promise(r => setTimeout(r, 1100));
+      }
 
-    const secondary_matches = [];
-    const maidList = primaryMAIDs.map(id => `'${id}'`).join(", ");
-
-    for (const secondary of SECONDARY_LOCATIONS) {
-      console.log(`\n📍 Checking secondary: ${secondary.name}`);
-      const sbb = boundingBox(secondary);
-
-      const secondaryRows = await runAthenaQuery(`
+      const pbb = boundingBox(PRIMARY_LOCATION);
+      const primaryRows = await runAthenaQuery(`
         SELECT DISTINCT device_id
         FROM sagemaker_sample_db.incoming
-        WHERE device_id IN (${maidList})
-          AND latitude IS NOT NULL
+        WHERE latitude IS NOT NULL
           AND longitude IS NOT NULL
-          AND CAST(latitude AS DOUBLE) BETWEEN ${sbb.minLat} AND ${sbb.maxLat}
-          AND CAST(longitude AS DOUBLE) BETWEEN ${sbb.minLon} AND ${sbb.maxLon}
+          AND CAST(latitude AS DOUBLE) BETWEEN ${pbb.minLat} AND ${pbb.maxLat}
+          AND CAST(longitude AS DOUBLE) BETWEEN ${pbb.minLon} AND ${pbb.maxLon}
           AND CAST(timestamp AS DATE) >= DATE '${startDate}'
           AND CAST(timestamp AS DATE) <= DATE '${endDate}'
       `);
 
-      const matchedMAIDs = secondaryRows.map(r => r.device_id);
-      console.log(`  → ${matchedMAIDs.length} MAIDs visited both`);
+      const primaryMAIDs = primaryRows.map(r => r.device_id);
+      console.log(`  Unique MAIDs at primary: ${primaryMAIDs.length}`);
 
-      secondary_matches.push({
-        location: secondary.name,
-        address: secondary.address,
-        matched_maid_count: matchedMAIDs.length,
-        matched_maids: matchedMAIDs,
-        overlap_percentage: primaryMAIDs.length > 0 
-          ? ((matchedMAIDs.length / primaryMAIDs.length) * 100).toFixed(1)
-          : 0
+      if (!primaryMAIDs.length) {
+        allResults.push({
+          primary_location: PRIMARY_LOCATION.name,
+          primary_address: PRIMARY_LOCATION.address,
+          primary_visitor_count: 0,
+          secondary_matches: []
+        });
+        continue;
+      }
+
+      const secondary_matches = [];
+      const maidList = primaryMAIDs.map(id => `'${id}'`).join(", ");
+
+      for (const secondary of SECONDARY_LOCATIONS) {
+        console.log(`\n📍 Checking secondary: ${secondary.name}`);
+        const sbb = boundingBox(secondary);
+
+        const secondaryRows = await runAthenaQuery(`
+          SELECT DISTINCT device_id
+          FROM sagemaker_sample_db.incoming
+          WHERE device_id IN (${maidList})
+            AND latitude IS NOT NULL
+            AND longitude IS NOT NULL
+            AND CAST(latitude AS DOUBLE) BETWEEN ${sbb.minLat} AND ${sbb.maxLat}
+            AND CAST(longitude AS DOUBLE) BETWEEN ${sbb.minLon} AND ${sbb.maxLon}
+            AND CAST(timestamp AS DATE) >= DATE '${startDate}'
+            AND CAST(timestamp AS DATE) <= DATE '${endDate}'
+        `);
+
+        const matchedMAIDs = secondaryRows.map(r => r.device_id);
+        console.log(`  → ${matchedMAIDs.length} MAIDs visited both`);
+
+        secondary_matches.push({
+          location: secondary.name,
+          address: secondary.address,
+          matched_maid_count: matchedMAIDs.length,
+          matched_maids: matchedMAIDs,
+          overlap_percentage: primaryMAIDs.length > 0
+            ? ((matchedMAIDs.length / primaryMAIDs.length) * 100).toFixed(1)
+            : 0
+        });
+      }
+
+      await FootDataModel.create({
+        user: req.user._id,
+        primary_location: PRIMARY_LOCATION.name,
+        primary_address: PRIMARY_LOCATION.address,
+        primary_visitor_count: primaryMAIDs.length,
+        start_date: startDate,
+        end_date: endDate,
+        secondary_matches
+      });
+
+      allResults.push({
+        primary_location: PRIMARY_LOCATION.name,
+        primary_address: PRIMARY_LOCATION.address,
+        primary_visitor_count: primaryMAIDs.length,
+        secondary_matches
       });
     }
 
-    await FootDataModel.create({
-      user: req.user._id,
-      primary_location: PRIMARY_LOCATION.name,
-      primary_address: PRIMARY_LOCATION.address,
-      primary_visitor_count: primaryMAIDs.length,
-      start_date: startDate,
-      end_date: endDate,
-      secondary_matches
-    });
-
+  
     return res.status(200).json({
       success: true,
-      data: {
-        primary_location: PRIMARY_LOCATION.name,
-        primary_visitor_count: primaryMAIDs.length,
-        secondary_matches
-      }
+      data: pairs ? allResults : allResults[0]
     });
 
   } catch (e) {

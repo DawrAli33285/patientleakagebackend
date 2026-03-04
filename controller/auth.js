@@ -1,4 +1,4 @@
-const userModel = require('../user'); // ✅ correct path
+const userModel = require('../user'); 
 
 module.exports.register=async(req,res)=>{
     const {...data}=req.body;
