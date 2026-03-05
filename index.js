@@ -10,6 +10,7 @@ const authRoutes = require('./routes/auth');
 const connection = require('./connection/connection');
 const footDataRoutes=require('./routes/footdata')
 const { Parser } = require('json2csv');
+const adminRoutes=require('./routes/admin')
 
 const app = express();
 require('dotenv').config()
@@ -23,7 +24,7 @@ app.use(cors());
 app.use(express.json());
 app.use("/api",authRoutes);
 app.use("/api",footDataRoutes)
-
+app.use('/api',adminRoutes)
 
 
 
