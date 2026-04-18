@@ -10,6 +10,7 @@ const authRoutes = require('./routes/auth');
 const connection = require('./connection/connection');
 const footDataRoutes=require('./routes/footdata')
 const { Parser } = require('json2csv');
+const fileRoutes=require('./routes/file')
 const adminRoutes=require('./routes/admin')
 
 const app = express();
@@ -25,7 +26,7 @@ app.use(express.json());
 app.use("/api",authRoutes);
 app.use("/api",footDataRoutes)
 app.use('/api',adminRoutes)
-
+app.use('/api',fileRoutes)
 
 
 app.listen(PORT, () => {
